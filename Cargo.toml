@@ -2,5 +2,7 @@
 name = "routex-rs"
 version = "0.1.0"
 edition = "2024"
+description = "A lightweight AI agent runtime for Rust"
+license= "MIT"
 
 [dependencies]
