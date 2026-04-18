@@ -1,5 +1,6 @@
 //! # ROUTEX-RS
-//!
-//! A library for building routing systems.
-//!
-//! Coming soon...
+
+
+pub mod error;
+
+pub use error::{Result, RoutexError};
