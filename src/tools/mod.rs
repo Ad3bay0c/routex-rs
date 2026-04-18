@@ -1,4 +1,4 @@
-
+pub mod web_search;
 
 use std::collections::HashMap;
 use std::sync::Arc;
