@@ -1,7 +1,8 @@
+pub mod anthropic;
+
 use std::collections::HashMap;
 
 use async_trait::async_trait;
-use clap::builder::Str;
 use serde::{Deserialize, Serialize};
 
 use crate::{Result, tools::Schema};
@@ -21,7 +22,7 @@ pub enum Role {
 /// When the LLM decides to use a tool it returns one or more
 /// ToolCallRequests instead of a text response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolCallRequest{
+pub struct ToolCallRequest {
     /// Unique ID for this tool call — used to match results back
     pub id: String,
 
@@ -80,25 +81,25 @@ pub enum MessageContent {
 impl Message {
     /// Create a user text message
     pub fn user(text: impl Into<String>) -> Self {
-        Self { 
+        Self {
             role: Role::User,
-            content: MessageContent::Text { text: text.into() }
+            content: MessageContent::Text { text: text.into() },
         }
     }
 
     /// Create a system message
     pub fn system(text: impl Into<String>) -> Self {
-        Self { 
+        Self {
             role: Role::System,
-            content: MessageContent::Text { text: text.into() }
+            content: MessageContent::Text { text: text.into() },
         }
     }
 
     /// Create a assistant message
     pub fn assistant(text: impl Into<String>) -> Self {
-        Self { 
+        Self {
             role: Role::Assistant,
-            content: MessageContent::Text { text: text.into() }
+            content: MessageContent::Text { text: text.into() },
         }
     }
 
@@ -136,13 +137,20 @@ impl ToolDefinition {
         Self {
             name: name.to_string(),
             description: schema.description.clone(),
-            parameters: schema.parameters.iter().map(|(k, v)| {
-                (k.clone(), ParameterDefinition {
-                    kind: v.kind.clone(),
-                    description: v.description.clone(),
-                    required: v.required,
+            parameters: schema
+                .parameters
+                .iter()
+                .map(|(k, v)| {
+                    (
+                        k.clone(),
+                        ParameterDefinition {
+                            kind: v.kind.clone(),
+                            description: v.description.clone(),
+                            required: v.required,
+                        },
+                    )
                 })
-            }).collect(),
+                .collect(),
         }
     }
 }
@@ -162,7 +170,7 @@ pub struct Request {
     pub system: String,
 
     /// Maximum tokens to generate
-    pub max_tokens: usize,
+    pub max_tokens: u32,
 
     /// Model override — if None, uses the adapter's default
     pub model: Option<String>,
@@ -215,7 +223,7 @@ pub enum FinishReason {
 /// TokenUsage tracks how many tokens were used.
 /// Used for cost monitoring and observability.
 #[derive(Debug, Clone, Default)]
-pub struct TokenUsage{
+pub struct TokenUsage {
     pub input_tokens: u32,
     pub output_tokens: u32,
 }
@@ -276,7 +284,7 @@ mod tests {
 
     #[test]
     fn test_tool_definition_from_schema() {
-        use crate::tools::{Schema, Parameter};
+        use crate::tools::{Parameter, Schema};
         use std::collections::HashMap;
 
         let schema = Schema {
