@@ -6,10 +6,7 @@ use tokio::sync::mpsc;
 use crate::{
     Result, RoutexError,
     config::AgentConfig,
-    llm::{
-        self, Adapter, Message, Request, ResponseContent, ToolCallRequest, ToolCallResult,
-        ToolDefinition,
-    },
+    llm::{self, Adapter, Message, Request, ResponseContent, ToolCallResult, ToolDefinition},
     tools::Registry,
 };
 
@@ -256,5 +253,228 @@ impl Agent {
             .collect();
 
         futures::future::join_all(futures).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{AgentConfig, AgentLlmConfig};
+    use crate::llm::{FinishReason, Response, ResponseContent, TokenUsage};
+    use crate::tools::{Parameter, Schema, Tool};
+    use async_trait::async_trait;
+    use serde_json::{Value, json};
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+
+    /// Mock LLM adapter — returns predefined responses
+    struct MockAdapter {
+        /// Responses to return in order
+        /// Mutex because the mock is shared across async calls
+        responses: Mutex<Vec<Response>>,
+    }
+
+    impl MockAdapter {
+        fn new(responses: Vec<Response>) -> Self {
+            Self {
+                responses: Mutex::new(responses),
+            }
+        }
+
+        fn text_response(text: &str) -> Response {
+            Response {
+                content: ResponseContent::Text(text.to_string()),
+                finish_reason: FinishReason::Stop,
+                usage: TokenUsage {
+                    input_tokens: 10,
+                    output_tokens: 20,
+                },
+            }
+        }
+
+        fn tool_response(tool_name: &str, input: Value) -> Response {
+            Response {
+                content: ResponseContent::ToolCalls(vec![crate::llm::ToolCallRequest {
+                    id: "test-call-id".to_string(),
+                    tool_name: tool_name.to_string(),
+                    input,
+                }]),
+                finish_reason: FinishReason::ToolUse,
+                usage: TokenUsage {
+                    input_tokens: 10,
+                    output_tokens: 5,
+                },
+            }
+        }
+    }
+
+    #[async_trait]
+    impl Adapter for MockAdapter {
+        async fn complete(&self, _req: Request) -> Result<Response> {
+            let mut responses = self.responses.lock().unwrap();
+            if responses.is_empty() {
+                return Err(RoutexError::LLM(
+                    "mock adapter: no more responses".to_string(),
+                ));
+            }
+            Ok(responses.remove(0))
+        }
+
+        fn model(&self) -> &str {
+            "mock-model"
+        }
+        fn provider(&self) -> &str {
+            "mock"
+        }
+    }
+
+    /// Mock tool — records calls and returns a fixed output
+    struct EchoTool;
+
+    #[async_trait]
+    impl Tool for EchoTool {
+        fn name(&self) -> &str {
+            "echo"
+        }
+
+        fn schema(&self) -> Schema {
+            Schema {
+                description: "Echoes input".to_string(),
+                parameters: HashMap::from([(
+                    "message".to_string(),
+                    Parameter {
+                        kind: "string".to_string(),
+                        description: "Message to echo".to_string(),
+                        required: true,
+                    },
+                )]),
+            }
+        }
+
+        async fn execute(&self, input: Value) -> Result<Value> {
+            Ok(input)
+        }
+    }
+
+    fn make_config() -> AgentConfig {
+        AgentConfig {
+            id: "test-agent".to_string(),
+            role: crate::config::Role::Researcher,
+            goal: "research topics thoroughly".to_string(),
+            backstory: None,
+            tools: vec!["echo".to_string()],
+            depends: vec![],
+            restart: "one_for_one".to_string(),
+            llm: None,
+            max_tool_calls: 20,
+        }
+    }
+
+    fn make_agent(adapter: Arc<dyn Adapter>) -> Agent {
+        let mut registry = Registry::new();
+        registry.register(EchoTool);
+        Agent::new(make_config(), adapter, Arc::new(registry))
+    }
+
+    #[tokio::test]
+    async fn test_agent_completes_with_text_response() {
+        let adapter = Arc::new(MockAdapter::new(vec![MockAdapter::text_response(
+            "The research is complete.",
+        )]));
+        let agent = make_agent(adapter);
+
+        let (tx_in, rx_in) = mpsc::channel(1);
+        let (tx_out, mut rx_out) = mpsc::channel(10);
+
+        tx_in
+            .send("Research Go frameworks".to_string())
+            .await
+            .unwrap();
+
+        let result = agent.run(rx_in, tx_out).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "The research is complete.");
+
+        // Verify status updates were sent
+        let started = rx_out.recv().await.unwrap();
+        assert!(matches!(started.status, AgentStatus::Started));
+    }
+
+    #[tokio::test]
+    async fn test_agent_executes_tool_then_completes() {
+        let adapter = Arc::new(MockAdapter::new(vec![
+            // First call: LLM requests a tool
+            MockAdapter::tool_response("echo", json!({"message": "hello"})),
+            // Second call: LLM produces final text
+            MockAdapter::text_response("Done after using echo tool."),
+        ]));
+        let agent = make_agent(adapter);
+
+        let (tx_in, rx_in) = mpsc::channel(1);
+        let (tx_out, _rx_out) = mpsc::channel(10);
+
+        tx_in.send("Do something".to_string()).await.unwrap();
+
+        let result = agent.run(rx_in, tx_out).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "Done after using echo tool.");
+    }
+
+    #[tokio::test]
+    async fn test_agent_fails_if_inbox_closed() {
+        let adapter = Arc::new(MockAdapter::new(vec![]));
+        let agent = make_agent(adapter);
+
+        let (_tx_in, rx_in) = mpsc::channel::<String>(1);
+        let (tx_out, _rx_out) = mpsc::channel(10);
+
+        // Drop tx_in immediately — inbox is closed before task arrives
+        drop(_tx_in);
+
+        let result = agent.run(rx_in, tx_out).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("inbox closed"));
+    }
+
+    #[tokio::test]
+    async fn test_agent_respects_tool_call_budget() {
+        // Return tool calls until budget exceeded, then a text response
+        let mut responses = Vec::new();
+        for _ in 0..25 {
+            responses.push(MockAdapter::tool_response(
+                "echo",
+                json!({"message": "test"}),
+            ));
+        }
+        responses.push(MockAdapter::text_response("Final answer."));
+
+        let adapter = Arc::new(MockAdapter::new(responses));
+        let agent = make_agent(adapter);
+
+        let (tx_in, rx_in) = mpsc::channel(1);
+        let (tx_out, _rx_out) = mpsc::channel(100);
+
+        tx_in.send("Do many tool calls".to_string()).await.unwrap();
+
+        let result = agent.run(rx_in, tx_out).await;
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_build_system_prompt_includes_role_and_goal() {
+        let adapter = Arc::new(MockAdapter::new(vec![]));
+        let agent = make_agent(adapter);
+        let prompt = agent.build_system_prompt();
+        assert!(prompt.contains("research agent"));
+        assert!(prompt.contains("research topics thoroughly"));
+    }
+
+    #[test]
+    fn test_build_tool_definitions_only_includes_agent_tools() {
+        let adapter = Arc::new(MockAdapter::new(vec![]));
+        let agent = make_agent(adapter);
+        let defs = agent.build_tool_definitions();
+        assert_eq!(defs.len(), 1);
+        assert_eq!(defs[0].name, "echo");
     }
 }
