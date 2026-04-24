@@ -1,4 +1,4 @@
-use std::{os::macos::raw::stat, result, time::Duration, vec};
+use std::{time::Duration, vec};
 
 use async_trait::async_trait;
 use reqwest::Client;
@@ -156,11 +156,11 @@ fn translate_messages(system_prompt: &str, messages: &[Message]) -> Vec<OpenAIMe
                     tool_calls: vec![],
                 });
             }
-            MessageContent::ToolUse { calls: toolCalls } => {
-                let mut calls: Vec<OpenAIToolCall> = Vec::new();
+            MessageContent::ToolUse { calls } => {
+                let mut tool_calls: Vec<OpenAIToolCall> = Vec::new();
 
-                for tc in toolCalls {
-                    calls.push(OpenAIToolCall {
+                for tc in calls {
+                    tool_calls.push(OpenAIToolCall {
                         function: OpenAIToolCallFunction {
                             arguments: tc.input.clone(),
                             name: tc.tool_name.clone(),
@@ -174,7 +174,7 @@ fn translate_messages(system_prompt: &str, messages: &[Message]) -> Vec<OpenAIMe
                     content: "".to_string(),
                     role: role.to_string(),
                     tool_call_id: None,
-                    tool_calls: calls,
+                    tool_calls,
                 });
             }
             MessageContent::ToolResult { results } => {
@@ -196,7 +196,7 @@ fn translate_messages(system_prompt: &str, messages: &[Message]) -> Vec<OpenAIMe
     outputs
 }
 
-fn translatet_tools(tools: &[super::ToolDefinition]) -> Vec<OpenAITool> {
+fn translate_tools(tools: &[super::ToolDefinition]) -> Vec<OpenAITool> {
     tools
         .iter()
         .map(|tool| {
@@ -302,7 +302,7 @@ impl Adapter for OpenAIAdapter {
             model,
             max_completion_tokens: Some(req.max_tokens),
             messages: translate_messages(&req.system, &req.messages),
-            tools: translatet_tools(&req.tools),
+            tools: translate_tools(&req.tools),
         };
 
         let url = format!("{}/v1/chat/completions", self.base_url);
