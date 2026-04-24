@@ -75,6 +75,47 @@ pub struct RuntimeConfig {
     pub max_tokens: u32,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Role {
+    Planner,
+    Writer,
+    Critic,
+    Executor,
+    Researcher,
+}
+
+impl Role {
+    pub fn system_prompt(&self) -> String {
+        match self {
+            Role::Planner => "You are a planning agent. Your only job is to read the task \
+			and break it down into a clear, numbered list of steps for other \
+			agents to follow. Do not do the work yourself — only plan it. \
+			Be specific and actionable."
+                .to_string(),
+            Role::Writer => "You are a writing agent. You receive a plan and execute it \
+			by researching, thinking, and producing well-structured written output. \
+			Use your tools when you need information from the web or files. \
+			Be thorough and cite your sources."
+                .to_owned(),
+            Role::Critic => "You are a critic agent. You receive a piece of work and review it \
+			for quality, accuracy, completeness, and clarity. \
+			Be constructive. Point out what is good, what is missing, \
+			and what could be improved. Give a score out of 10."
+                .to_string(),
+            Role::Executor => "You are an executor agent. You carry out specific actions \
+			using the tools available to you. Follow instructions precisely. \
+			Report back exactly what happened — success or failure."
+                .to_string(),
+            Role::Researcher => "You are a research agent. Your job is to find, read, and \
+			summarise information relevant to the task. \
+			Do not produce long reports — produce concise, factual summaries \
+			that other agents can use."
+                .to_string(),
+        }
+    }
+}
+
 /// AgentConfig defines a single agent in the crew.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentConfig {
@@ -83,7 +124,7 @@ pub struct AgentConfig {
 
     /// The agent's role — used in the system prompt
     /// e.g. "researcher", "writer", "critic"
-    pub role: String,
+    pub role: Role,
 
     /// What this agent is trying to achieve — used in the system prompt
     pub goal: String,
