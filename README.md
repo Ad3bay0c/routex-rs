@@ -1,3 +1,8 @@
+[![Repo](https://img.shields.io/badge/github-routex--rs-181717?logo=github&logoColor=white)](https://github.com/Ad3bay0c/routex-rs)
+[![Rust](https://img.shields.io/badge/rust-2024%20edition-DEA584?logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Status: WIP](https://img.shields.io/badge/status-WIP-yellow)](#)
+
 ```
   ██████╗  ██████╗ ██╗   ██╗████████╗███████╗██╗  ██╗      ██████╗ ███████╗
   ██╔══██╗██╔═══██╗██║   ██║╚══██╔══╝██╔════╝╚██╗██╔╝      ██╔══██╗██╔════╝
@@ -8,6 +13,7 @@
 
   Routex-rs — lightweight AI agent runtime for Rust
 ```
+
 
 Routex is a small Rust crate + CLI for running **multi-agent** workflows defined in an `agents.yaml`.
 Agents form a dependency graph; the runtime executes independent agents **in parallel** and passes upstream outputs into downstream prompts.
@@ -157,4 +163,4 @@ This project is intentionally small; some configuration fields exist but are not
 
 ## Contributing
 
-See `CONTRIBUTING.md`.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md).
