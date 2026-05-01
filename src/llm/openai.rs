@@ -1,4 +1,4 @@
-use std::{time::Duration};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use reqwest::Client;
@@ -156,22 +156,13 @@ struct OpenAIParameters {
 struct OpenAIResponse {
     choices: Vec<OpenAIChoice>,
     usage: OpenAIUsage,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<OpenAIResponseError>,
-}
-
-#[derive(Debug, Deserialize)]
-struct OpenAIResponseError {
-    message: String,
-    #[serde(rename = "type")]
-    kind: String,
 }
 
 /// A single completion choice
 #[derive(Debug, Deserialize)]
 struct OpenAIChoice {
     message: OpenAIMessage,
-    finish_reason: String,
+    finish_reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -313,7 +304,7 @@ fn translate_response(raw: OpenAIResponse) -> Result<Response> {
         .next()
         .ok_or_else(|| RoutexError::LLM("openai: response contained no choices".to_string()))?;
 
-    let finish_reason = match choice.finish_reason.as_str() {
+    let finish_reason = match choice.finish_reason.as_deref().unwrap_or("stop") {
         "stop" => FinishReason::Stop,
         "tool_calls" => FinishReason::ToolUse,
         "length" => FinishReason::MaxTokens,
@@ -357,7 +348,7 @@ impl Adapter for OpenAIAdapter {
     fn model(&self) -> &str {
         &self.model
     }
-    
+
     fn provider(&self) -> &str {
         "openai"
     }
@@ -403,13 +394,6 @@ impl Adapter for OpenAIAdapter {
             .json()
             .await
             .map_err(|e| RoutexError::LLM(format!("open ai: parse response: {}", e)))?;
-
-        if let Some(e) = response.error {
-            return Err(RoutexError::LLM(format!(
-                "openai: response error: {}: {}",
-                e.kind, e.message
-            )));
-        }
 
         translate_response(response)
     }
@@ -638,13 +622,12 @@ mod tests {
                     tool_call_id: None,
                     name: None,
                 },
-                finish_reason: "tool_calls".to_string(),
+                finish_reason: Some("tool_calls".to_string()),
             }],
             usage: OpenAIUsage {
                 prompt_tokens: 10,
                 completion_tokens: 5,
             },
-            error: None,
         };
 
         let response = translate_response(raw).unwrap();
