@@ -76,9 +76,6 @@ struct DuckDuckGoTopic {
 
     #[serde(rename = "FirstURL")]
     first_url: String,
-
-    #[serde(rename = "Result")]
-    result: Option<String>,
 }
 
 fn default_max_results() -> usize {

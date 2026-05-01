@@ -49,7 +49,7 @@ pub struct RunResult {
 pub struct Runtime {
     config: Config,
     registry: Arc<Registry>,
-    adapter: Arc<dyn Adapter + Send + Sync>,
+    adapter: Option<Arc<dyn Adapter + Send + Sync>>,
 }
 
 impl Runtime {
@@ -62,10 +62,10 @@ impl Runtime {
 
     /// Create a Runtime from an already-parsed Config.
     pub fn from_config(config: Config) -> Result<Self> {
-        // Build the LLM adapter from the runtime config
-        let adapter = build_adapter(&config)?;
+        
         let mut registry = Registry::new();
 
+        // Auto-register built-in tools declared in config
         for tool_cfg in &config.tools {
             match tool_cfg.name.as_str() {
                 "web_search" => {
@@ -82,7 +82,7 @@ impl Runtime {
         Ok(Self {
             config,
             registry: Arc::new(registry),
-            adapter,
+            adapter: None,
         })
     }
 
@@ -104,6 +104,8 @@ impl Runtime {
     pub async fn run(&self) -> Result<RunResult> {
         // Validate tool references before starting
         self.validate_tool_references()?;
+
+        let adapter = build_adapter(&self.config)?;
 
         let agent_count = self.config.agents.len();
 
@@ -139,7 +141,7 @@ impl Runtime {
 
                 let agent = Agent::new(
                     agent_config,
-                    Arc::clone(&self.adapter),
+                    Arc::clone(&adapter),
                     Arc::clone(&self.registry),
                 );
 
@@ -215,6 +217,12 @@ impl Runtime {
             }
         }
         Ok(())
+    }
+
+    /// List all registered tools.
+    /// Used by the CLI's `routex tools list` command.
+    pub fn list_tools(&self) -> Vec<crate::tools::ToolInfo> {
+        self.registry.list()
     }
 }
 
@@ -409,7 +417,7 @@ fn build_adapter(config: &Config) -> Result<Arc<dyn Adapter + Send + Sync>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{AgentConfig, Config, RuntimeConfig, TaskConfig, ToolConfig};
+    use crate::config::{AgentConfig, Config, RuntimeConfig, TaskConfig};
 
     fn make_config(agents: Vec<AgentConfig>) -> Config {
         Config {
