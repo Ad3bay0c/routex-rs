@@ -57,7 +57,7 @@ pub struct Agent {
     pub config: AgentConfig,
 
     /// The LLM adapter — Anthropic, OpenAI, or Ollama
-    adapter: Arc<dyn Adapter>,
+    adapter: Arc<dyn Adapter + Send + Sync>,
 
     /// The tool registry — shared across all agents in the crew
     registry: Arc<Registry>,
@@ -68,7 +68,11 @@ impl Agent {
     ///
     /// Takes Arc references because multiple agents share the same
     /// registry and potentially the same adapter.
-    pub fn new(config: AgentConfig, adapter: Arc<dyn Adapter>, registry: Arc<Registry>) -> Self {
+    pub fn new(
+        config: AgentConfig,
+        adapter: Arc<dyn Adapter + Send + Sync>,
+        registry: Arc<Registry>,
+    ) -> Self {
         Self {
             config,
             adapter,
@@ -259,7 +263,7 @@ impl Agent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{AgentConfig, AgentLlmConfig};
+    use crate::config::AgentConfig;
     use crate::llm::{FinishReason, Response, ResponseContent, TokenUsage};
     use crate::tools::{Parameter, Schema, Tool};
     use async_trait::async_trait;
@@ -328,7 +332,6 @@ mod tests {
         }
     }
 
-    /// Mock tool — records calls and returns a fixed output
     struct EchoTool;
 
     #[async_trait]
@@ -370,7 +373,7 @@ mod tests {
         }
     }
 
-    fn make_agent(adapter: Arc<dyn Adapter>) -> Agent {
+    fn make_agent(adapter: Arc<dyn Adapter + Send + Sync>) -> Agent {
         let mut registry = Registry::new();
         registry.register(EchoTool);
         Agent::new(make_config(), adapter, Arc::new(registry))
@@ -387,7 +390,7 @@ mod tests {
         let (tx_out, mut rx_out) = mpsc::channel(10);
 
         tx_in
-            .send("Research Go frameworks".to_string())
+            .send("Research Rust frameworks".to_string())
             .await
             .unwrap();
 
