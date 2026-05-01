@@ -2,10 +2,12 @@
 name = "routex-rs"
 version = "0.1.0"
 edition = "2024"
-description = "A lightweight AI agent runtime for Rust"
+description = "A YAML-driven multi-agent AI runtime for Rust"
 license= "MIT"
 repository = "https://github.com/Ad3bay0c/routex-rs"
 readme = "README.md"
+keywords = ["ai", "agents", "llm", "multi-agent", "yaml"]
+categories = ["command-line-utilities", "asynchronous"]
 
 [lib]
 name = "routex"
