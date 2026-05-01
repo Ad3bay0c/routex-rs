@@ -323,7 +323,7 @@ mod tests {
         assert_eq!(tool.name(), "web_search");
     }
 
-     #[test]
+    #[test]
     fn test_schema_has_required_fields() {
         let tool = WebSearchTool::new();
         let schema = tool.schema();
