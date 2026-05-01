@@ -13,7 +13,7 @@ use crate::{Result, RoutexError};
 
 const DEFAULT_BASE_URL: &str = "https://api.openai.com";
 
-struct OpenAIAdapter {
+pub struct OpenAIAdapter {
     client: Client,
     base_url: String,
     api_key: String,
