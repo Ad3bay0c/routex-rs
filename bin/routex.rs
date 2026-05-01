@@ -57,6 +57,8 @@ enum ToolsCommand {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    dotenvy::dotenv().ok();
+
     let cli = Cli::parse();
 
     match cli.command {
