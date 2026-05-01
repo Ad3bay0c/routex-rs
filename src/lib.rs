@@ -7,6 +7,6 @@ pub mod llm;
 pub mod runtime;
 pub mod tools;
 
-pub use error::{Result, RoutexError};
-pub use runtime::{Runtime, RunResult};
 pub use config::Config;
+pub use error::{Result, RoutexError};
+pub use runtime::{RunResult, Runtime};

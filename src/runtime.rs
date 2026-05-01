@@ -62,7 +62,6 @@ impl Runtime {
 
     /// Create a Runtime from an already-parsed Config.
     pub fn from_config(config: Config) -> Result<Self> {
-        
         let mut registry = Registry::new();
 
         // Auto-register built-in tools declared in config

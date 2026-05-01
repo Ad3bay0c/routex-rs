@@ -46,7 +46,7 @@ enum Command {
     Tools {
         #[command(subcommand)]
         command: ToolsCommand,
-    }
+    },
 }
 
 #[derive(Subcommand)]
@@ -80,8 +80,7 @@ async fn run_command(config_path: &str) -> Result<()> {
 
     println!("routex › starting crew\n");
 
-    let result = runtime.run().await
-        .with_context(|| "crew run failed")?;
+    let result = runtime.run().await.with_context(|| "crew run failed")?;
 
     println!("\n─────────────────────────────────────────");
     println!("routex › crew completed\n");
@@ -116,9 +115,7 @@ fn validate_command(config_path: &str) -> Result<()> {
 fn tools_list_command() -> Result<()> {
     // Build a temporary runtime with an empty config to access the registry
     // This is a lightweight operation — no LLM calls, no agents
-    use routex::config::{
-        Config, RuntimeConfig, TaskConfig,
-    };
+    use routex::config::{Config, RuntimeConfig, TaskConfig};
 
     let config = Config {
         runtime: RuntimeConfig {
@@ -134,19 +131,16 @@ fn tools_list_command() -> Result<()> {
             input: String::new(),
         },
         agents: vec![],
-        tools: vec![
-            routex::config::ToolConfig {
-                name: "web_search".to_string(),
-                api_key: None,
-                base_dir: None,
-                max_results: None,
-                extra: std::collections::HashMap::new(),
-            },
-        ],
+        tools: vec![routex::config::ToolConfig {
+            name: "web_search".to_string(),
+            api_key: None,
+            base_dir: None,
+            max_results: None,
+            extra: std::collections::HashMap::new(),
+        }],
     };
 
-    let runtime = Runtime::from_config(config)
-        .context("failed to initialise runtime")?;
+    let runtime = Runtime::from_config(config).context("failed to initialise runtime")?;
 
     let tools = runtime.list_tools();
 
@@ -157,7 +151,10 @@ fn tools_list_command() -> Result<()> {
 
     println!("\nBuilt-in tools ({})\n", tools.len());
     println!("  {:<25}  {}", "NAME", "DESCRIPTION");
-    println!("  {:<25}  {}", "────────────────────────", "──────────────────────────────────────────");
+    println!(
+        "  {:<25}  {}",
+        "────────────────────────", "──────────────────────────────────────────"
+    );
 
     for tool in tools {
         // Truncate description at 55 chars for clean alignment
