@@ -1,4 +1,5 @@
 pub mod anthropic;
+pub mod ollama;
 pub mod openai;
 
 use std::collections::HashMap;

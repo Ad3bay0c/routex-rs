@@ -9,7 +9,7 @@ use crate::{
     Result, RoutexError,
     agent::{Agent, AgentMessage},
     config::Config,
-    llm::{Adapter, anthropic::AnthropicAdapter, openai::OpenAIAdapter},
+    llm::{Adapter, anthropic::AnthropicAdapter, ollama::OllamaAdapter, openai::OpenAIAdapter},
     tools::Registry,
 };
 
@@ -49,6 +49,7 @@ pub struct RunResult {
 pub struct Runtime {
     config: Config,
     registry: Arc<Registry>,
+    #[allow(dead_code)]
     adapter: Option<Arc<dyn Adapter + Send + Sync>>,
 }
 
@@ -398,13 +399,25 @@ fn build_adapter(config: &Config) -> Result<Arc<dyn Adapter + Send + Sync>> {
         "openai" => {
             if config.runtime.api_key.is_empty() {
                 return Err(RoutexError::Config(
-                    "openai provider require an api_key".to_string(),
+                    "openai provider requires an api_key — \
+                    set it in agents.yaml: api_key: \"env:OPENAI_API_KEY\" \
+                    then export OPENAI_API_KEY=sk-..."
+                        .to_string(),
                 ));
             }
-            Ok(Arc::new(OpenAIAdapter::new(
-                &config.runtime.api_key,
-                &config.runtime.model,
-            )))
+            let mut adapter = OpenAIAdapter::new(&config.runtime.api_key, &config.runtime.model);
+            if let Some(base_url) = &config.runtime.base_url {
+                adapter = adapter.with_base_url(base_url);
+            }
+            Ok(Arc::new(adapter))
+        }
+        "ollama" => {
+            // Ollama needs no API key — runs locally
+            let adapter = match &config.runtime.base_url {
+                Some(url) => OllamaAdapter::with_url(&config.runtime.model, url),
+                None => OllamaAdapter::new(&config.runtime.model),
+            };
+            Ok(Arc::new(adapter))
         }
         other => Err(RoutexError::Config(format!(
             "unknown llm_provider '{}' - supported: anthropic",
