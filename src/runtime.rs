@@ -102,104 +102,155 @@ impl Runtime {
     ///   3. Passes results from upstream agents to downstream agents
     ///   4. Returns the final output when all agents complete
     pub async fn run(&self) -> Result<RunResult> {
-        // Validate tool references before starting
+        let adapter = build_adapter(&self.config)?;
+        let registry = self.registry.clone();
+
         self.validate_tool_references()?;
 
-        let adapter = build_adapter(&self.config)?;
+        // Create the supervisor
+        let mut supervisor = crate::supervisor::Supervisor::new(&self.config.agents);
 
         let agent_count = self.config.agents.len();
-
         let (status_tx, mut status_rx) = mpsc::channel::<AgentMessage>(agent_count * 10);
 
-        // Track outputs from completed agents
         let mut agent_outputs: HashMap<String, String> = HashMap::new();
-
         let waves = build_execution_waves(&self.config)?;
 
-        // Execute wave by wave
-        // Each wave contains agents that can run in parallel
-        for wave in waves {
-            // Spawn all agents in this wave concurrently
-            let mut handles = Vec::new();
+        'wave_loop: for wave in &waves {
+            let mut remaining: Vec<String> = wave.clone();
 
-            for agent_id in &wave {
-                let agent_config = self
-                    .config
-                    .agents
-                    .iter()
-                    .find(|a| &a.id == agent_id)
-                    .expect("agent in wave must exist in config")
-                    .clone();
+            // Retry loop — handles supervisor decisions within a wave
+            loop {
+                let mut handles = Vec::new();
 
-                // Build the task input for this agent
-                // Include the original task + outputs from dependencies
-                let task = build_agent_task(
-                    &self.config.task.input,
-                    &agent_config.depends,
-                    &agent_outputs,
-                );
+                for agent_id in &remaining {
+                    let agent_config = self
+                        .config
+                        .agents
+                        .iter()
+                        .find(|a| &a.id == agent_id)
+                        .expect("agent must exist")
+                        .clone();
 
-                let agent = Agent::new(
-                    agent_config,
-                    Arc::clone(&adapter),
-                    Arc::clone(&self.registry),
-                );
+                    let task = build_agent_task(
+                        &self.config.task.input,
+                        &agent_config.depends,
+                        &agent_outputs,
+                    );
 
-                // Create channels for this agent
-                let (inbox_tx, inbox_rx) = mpsc::channel::<String>(1);
-                let status_tx = status_tx.clone();
+                    let adapter = Arc::clone(&adapter);
+                    let registry = Arc::clone(&registry);
+                    let agent = Agent::new(agent_config, adapter, registry);
 
-                // Send the task to the agent's inbox
-                inbox_tx
-                    .send(task)
-                    .await
-                    .map_err(|e| RoutexError::AgentFailed {
-                        id: agent_id.clone(),
-                        reason: format!("failed to send task: {}", e),
-                    })?;
+                    let (inbox_tx, inbox_rx) = mpsc::channel::<String>(1);
+                    let status_tx = status_tx.clone();
 
-                // Spawn the agent as an independent Tokio task
-                let handle = tokio::spawn(async move { agent.run(inbox_rx, status_tx).await });
+                    inbox_tx
+                        .send(task)
+                        .await
+                        .map_err(|e| RoutexError::AgentFailed {
+                            id: agent_id.clone(),
+                            reason: format!("failed to send task: {}", e),
+                        })?;
 
-                handles.push((agent_id.clone(), handle));
-            }
+                    let handle = tokio::spawn(async move { agent.run(inbox_rx, status_tx).await });
 
-            // Wait for all agents in this wave to complete
-            // Same as wg.Wait() in Go — blocks until the wave is done
-            for (agent_id, handle) in handles {
-                match handle.await {
-                    Ok(Ok(output)) => {
-                        agent_outputs.insert(agent_id, output);
+                    handles.push((agent_id.clone(), handle));
+                }
+
+                // Collect results — check for failures
+                let mut failed: Option<(String, String)> = None;
+
+                for (agent_id, handle) in handles {
+                    match handle.await {
+                        Ok(Ok(output)) => {
+                            // Success — reset supervisor record and store output
+                            supervisor.reset(&agent_id);
+                            agent_outputs.insert(agent_id, output);
+                        }
+                        Ok(Err(e)) => {
+                            failed = Some((agent_id, e.to_string()));
+                            break;
+                        }
+                        Err(e) => {
+                            failed = Some((agent_id, format!("task panicked: {}", e)));
+                            break;
+                        }
                     }
-                    Ok(Err(e)) => {
-                        return Err(RoutexError::AgentFailed {
-                            id: agent_id,
-                            reason: e.to_string(),
-                        });
+                }
+
+                match failed {
+                    None => {
+                        // All agents in this wave succeeded — move to next wave
+                        break;
                     }
-                    Err(e) => {
-                        // JoinError — the task panicked
-                        return Err(RoutexError::AgentFailed {
-                            id: agent_id,
-                            reason: format!("task panicked: {}", e),
-                        });
+                    Some((agent_id, reason)) => {
+                        // An agent failed — consult the supervisor
+                        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+
+                        let report = crate::supervisor::FailureReport {
+                            agent_id: agent_id.clone(),
+                            reason: reason.clone(),
+                            attempt: 1,
+                            reply: reply_tx,
+                        };
+
+                        supervisor.decide(report)?;
+
+                        // Wait for the supervisor's decision
+                        let decision = reply_rx.await.map_err(|_| RoutexError::AgentFailed {
+                            id: agent_id.clone(),
+                            reason: "supervisor dropped reply channel".to_string(),
+                        })?;
+
+                        match decision {
+                            crate::supervisor::Decision::Retry => {
+                                // Restart just this agent
+                                remaining = vec![agent_id];
+                                // Clear its previous output if any
+                                agent_outputs.remove(&remaining[0]);
+                            }
+
+                            crate::supervisor::Decision::RestartCascade(cascade) => {
+                                // Restart this agent and its dependents
+                                remaining = std::iter::once(agent_id)
+                                    .chain(cascade.into_iter())
+                                    .collect();
+                                for id in &remaining {
+                                    agent_outputs.remove(id);
+                                }
+                            }
+
+                            crate::supervisor::Decision::RestartAll => {
+                                // Restart the entire crew
+                                // Clear all outputs and restart from wave 1
+                                agent_outputs.clear();
+                                remaining =
+                                    self.config.agents.iter().map(|a| a.id.clone()).collect();
+                                continue 'wave_loop;
+                            }
+
+                            crate::supervisor::Decision::Fail(msg) => {
+                                return Err(RoutexError::AgentFailed {
+                                    id: agent_id,
+                                    reason: msg,
+                                });
+                            }
+                        }
                     }
                 }
             }
         }
 
-        // Drain remaining status messages
         drop(status_tx);
         while status_rx.try_recv().is_ok() {}
 
-        // The final output is from the last agent in the dependency graph
-        // — the agent with no dependents
         let final_output = find_final_output(&self.config, &agent_outputs)?;
 
         Ok(RunResult {
             output: final_output,
             agent_outputs,
-            total_input_tokens: 0, // TODO: collect from agent status
+            total_input_tokens: 0,
             total_output_tokens: 0,
         })
     }
