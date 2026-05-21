@@ -5,6 +5,7 @@ pub mod config;
 pub mod error;
 pub mod llm;
 pub mod runtime;
+pub mod supervisor;
 pub mod tools;
 
 pub use config::Config;
