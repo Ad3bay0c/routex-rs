@@ -1,10 +1,10 @@
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use super::{Parameter, Schema, Tool};
+use crate::error::{Result, RoutexError};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use crate::error::{Result, RoutexError};
-use super::{Tool, Schema, Parameter};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 /// WriteFileTool writes content to files on the local filesystem.
 ///
@@ -55,13 +55,10 @@ impl WriteFileTool {
         let path = Path::new(requested);
 
         let resolved = if let Some(base) = &self.base_dir {
-
             // Verify parent is within base_dir
-            let canonical_base = base.canonicalize().map_err(|e| {
-                RoutexError::ToolFailed {
-                    name: "write_file".to_string(),
-                    reason: format!("base_dir invalid: {}", e),
-                }
+            let canonical_base = base.canonicalize().map_err(|e| RoutexError::ToolFailed {
+                name: "write_file".to_string(),
+                reason: format!("base_dir invalid: {}", e),
             })?;
 
             // For write operations the file may not exist yet
@@ -73,10 +70,7 @@ impl WriteFileTool {
             if !normalised.starts_with(&canonical_base) {
                 return Err(RoutexError::ToolFailed {
                     name: "write_file".to_string(),
-                    reason: format!(
-                        "path '{}' is outside the allowed directory",
-                        requested
-                    ),
+                    reason: format!("path '{}' is outside the allowed directory", requested),
                 });
             }
 
@@ -117,14 +111,16 @@ impl Tool for WriteFileTool {
             description: "Write content to a file on the filesystem. \
                 Use for saving reports, storing data, or creating output files. \
                 Supports both creating new files and appending to existing ones. \
-                Parent directories are created automatically.".to_string(),
+                Parent directories are created automatically."
+                .to_string(),
             parameters: HashMap::from([
                 (
                     "path".to_string(),
                     Parameter {
                         kind: "string".to_string(),
                         description: "Path to write to. Parent directories \
-                            are created automatically.".to_string(),
+                            are created automatically."
+                            .to_string(),
                         required: true,
                     },
                 ),
@@ -141,7 +137,8 @@ impl Tool for WriteFileTool {
                     Parameter {
                         kind: "boolean".to_string(),
                         description: "If true, append to existing file \
-                            instead of overwriting. Defaults to false.".to_string(),
+                            instead of overwriting. Defaults to false."
+                            .to_string(),
                         required: false,
                     },
                 ),
@@ -151,8 +148,8 @@ impl Tool for WriteFileTool {
 
     async fn execute(&self, input: Value) -> Result<Value> {
         // parse input
-        let params: WriteFileInput = serde_json::from_value(input)
-            .map_err(|e| RoutexError::ToolFailed {
+        let params: WriteFileInput =
+            serde_json::from_value(input).map_err(|e| RoutexError::ToolFailed {
                 name: self.name().to_string(),
                 reason: format!("invalid input: {}", e),
             })?;
@@ -162,7 +159,8 @@ impl Tool for WriteFileTool {
 
         // create parent directories if needed
         if let Some(parent) = path.parent() {
-            tokio::fs::create_dir_all(parent).await
+            tokio::fs::create_dir_all(parent)
+                .await
                 .map_err(|e| RoutexError::ToolFailed {
                     name: self.name().to_string(),
                     reason: format!("create directories: {}", e),
@@ -187,21 +185,22 @@ impl Tool for WriteFileTool {
                     reason: format!("open file: {}", e),
                 })?;
 
-            file.write_all(params.content.as_bytes()).await
+            file.write_all(params.content.as_bytes())
+                .await
                 .map_err(|e| RoutexError::ToolFailed {
                     name: self.name().to_string(),
                     reason: format!("write file: {}", e),
                 })?;
 
             // Flush ensures data is written to OS buffer
-            file.flush().await
-                .map_err(|e| RoutexError::ToolFailed {
-                    name: self.name().to_string(),
-                    reason: format!("flush file: {}", e),
-                })?;
+            file.flush().await.map_err(|e| RoutexError::ToolFailed {
+                name: self.name().to_string(),
+                reason: format!("flush file: {}", e),
+            })?;
         } else {
             // Overwrite mode — replace existing content
-            tokio::fs::write(&path, params.content.as_bytes()).await
+            tokio::fs::write(&path, params.content.as_bytes())
+                .await
                 .map_err(|e| RoutexError::ToolFailed {
                     name: self.name().to_string(),
                     reason: format!("write file: {}", e),
@@ -222,72 +221,72 @@ impl Tool for WriteFileTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
     use serde_json::json;
+    use tempfile::TempDir;
 
     #[tokio::test]
     async fn test_write_new_file() {
         let dir = TempDir::new().unwrap();
-        let tool = WriteFileTool::new(
-            Some(dir.path().to_str().unwrap().to_string())
-        );
+        let tool = WriteFileTool::new(Some(dir.path().to_str().unwrap().to_string()));
 
-        let result = tool.execute(json!({
-            "path": "output.txt",
-            "content": "hello from routex-rs"
-        })).await.unwrap();
+        let result = tool
+            .execute(json!({
+                "path": "output.txt",
+                "content": "hello from routex-rs"
+            }))
+            .await
+            .unwrap();
 
         assert_eq!(result["bytes_written"], 20);
         assert_eq!(result["created"], true);
         assert_eq!(result["appended"], false);
 
         // Verify file was actually written
-        let content = std::fs::read_to_string(
-            dir.path().join("output.txt")
-        ).unwrap();
+        let content = std::fs::read_to_string(dir.path().join("output.txt")).unwrap();
         assert_eq!(content, "hello from routex-rs");
     }
 
     #[tokio::test]
     async fn test_append_to_existing_file() {
         let dir = TempDir::new().unwrap();
-        let tool = WriteFileTool::new(
-            Some(dir.path().to_str().unwrap().to_string())
-        );
+        let tool = WriteFileTool::new(Some(dir.path().to_str().unwrap().to_string()));
 
         // Write initial content
         tool.execute(json!({
             "path": "log.txt",
             "content": "line 1\n"
-        })).await.unwrap();
+        }))
+        .await
+        .unwrap();
 
         // Append second line
-        let result = tool.execute(json!({
-            "path": "log.txt",
-            "content": "line 2\n",
-            "append": true
-        })).await.unwrap();
+        let result = tool
+            .execute(json!({
+                "path": "log.txt",
+                "content": "line 2\n",
+                "append": true
+            }))
+            .await
+            .unwrap();
 
         assert_eq!(result["appended"], true);
         assert_eq!(result["created"], false);
 
-        let content = std::fs::read_to_string(
-            dir.path().join("log.txt")
-        ).unwrap();
+        let content = std::fs::read_to_string(dir.path().join("log.txt")).unwrap();
         assert_eq!(content, "line 1\nline 2\n");
     }
 
     #[tokio::test]
     async fn test_creates_parent_directories() {
         let dir = TempDir::new().unwrap();
-        let tool = WriteFileTool::new(
-            Some(dir.path().to_str().unwrap().to_string())
-        );
+        let tool = WriteFileTool::new(Some(dir.path().to_str().unwrap().to_string()));
 
         tool.execute(json!({
             "path": "reports/2026/summary.txt",
             "content": "report content"
-        })).await.unwrap();
+        }))
+        .await
+        .unwrap();
 
         assert!(dir.path().join("reports/2026/summary.txt").exists());
     }
@@ -295,37 +294,37 @@ mod tests {
     #[tokio::test]
     async fn test_overwrite_existing_file() {
         let dir = TempDir::new().unwrap();
-        let tool = WriteFileTool::new(
-            Some(dir.path().to_str().unwrap().to_string())
-        );
+        let tool = WriteFileTool::new(Some(dir.path().to_str().unwrap().to_string()));
 
         tool.execute(json!({
             "path": "file.txt",
             "content": "original"
-        })).await.unwrap();
+        }))
+        .await
+        .unwrap();
 
         tool.execute(json!({
             "path": "file.txt",
             "content": "overwritten"
-        })).await.unwrap();
+        }))
+        .await
+        .unwrap();
 
-        let content = std::fs::read_to_string(
-            dir.path().join("file.txt")
-        ).unwrap();
+        let content = std::fs::read_to_string(dir.path().join("file.txt")).unwrap();
         assert_eq!(content, "overwritten");
     }
 
     #[tokio::test]
     async fn test_path_traversal_blocked() {
         let dir = TempDir::new().unwrap();
-        let tool = WriteFileTool::new(
-            Some(dir.path().to_str().unwrap().to_string())
-        );
+        let tool = WriteFileTool::new(Some(dir.path().to_str().unwrap().to_string()));
 
-        let result = tool.execute(json!({
-            "path": "../../etc/evil.txt",
-            "content": "malicious"
-        })).await;
+        let result = tool
+            .execute(json!({
+                "path": "../../etc/evil.txt",
+                "content": "malicious"
+            }))
+            .await;
 
         assert!(result.is_err());
     }

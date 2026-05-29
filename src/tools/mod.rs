@@ -1,6 +1,6 @@
+pub mod read_file;
 pub mod web_search;
 pub mod wikipedia;
-pub mod read_file;
 pub mod write_file;
 
 use std::collections::HashMap;

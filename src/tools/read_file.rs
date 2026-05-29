@@ -1,10 +1,10 @@
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use super::{Parameter, Schema, Tool};
+use crate::error::{Result, RoutexError};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use crate::error::{Result, RoutexError};
-use super::{Tool, Schema, Parameter};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 /// ReadFileTool reads files from the local filesystem.
 ///
@@ -67,28 +67,21 @@ impl ReadFileTool {
 
             // Canonicalize to resolve .. and symlinks
             // Then verify the result is still within base_dir
-            let canonical = full.canonicalize().map_err(|e| {
-                RoutexError::ToolFailed {
-                    name: "read_file".to_string(),
-                    reason: format!("path '{}' not found: {}", requested, e),
-                }
+            let canonical = full.canonicalize().map_err(|e| RoutexError::ToolFailed {
+                name: "read_file".to_string(),
+                reason: format!("path '{}' not found: {}", requested, e),
             })?;
 
-            let canonical_base = base.canonicalize().map_err(|e| {
-                RoutexError::ToolFailed {
-                    name: "read_file".to_string(),
-                    reason: format!("base_dir invalid: {}", e),
-                }
+            let canonical_base = base.canonicalize().map_err(|e| RoutexError::ToolFailed {
+                name: "read_file".to_string(),
+                reason: format!("base_dir invalid: {}", e),
             })?;
 
             // Security check — resolved path must start with base_dir
             if !canonical.starts_with(&canonical_base) {
                 return Err(RoutexError::ToolFailed {
                     name: "read_file".to_string(),
-                    reason: format!(
-                        "path '{}' is outside the allowed directory",
-                        requested
-                    ),
+                    reason: format!("path '{}' is outside the allowed directory", requested),
                 });
             }
 
@@ -112,7 +105,8 @@ impl Tool for ReadFileTool {
         Schema {
             description: "Read the contents of a file from the filesystem. \
                 Use for reading configuration files, data files, reports, \
-                or any text content stored locally.".to_string(),
+                or any text content stored locally."
+                .to_string(),
             parameters: HashMap::from([
                 (
                     "path".to_string(),
@@ -120,7 +114,8 @@ impl Tool for ReadFileTool {
                         kind: "string".to_string(),
                         description: "Path to the file to read. \
                             Relative paths are resolved from the \
-                            configured base directory.".to_string(),
+                            configured base directory."
+                            .to_string(),
                         required: true,
                     },
                 ),
@@ -129,7 +124,8 @@ impl Tool for ReadFileTool {
                     Parameter {
                         kind: "integer".to_string(),
                         description: "Maximum bytes to read. \
-                            Defaults to 1MB.".to_string(),
+                            Defaults to 1MB."
+                            .to_string(),
                         required: false,
                     },
                 ),
@@ -139,8 +135,8 @@ impl Tool for ReadFileTool {
 
     async fn execute(&self, input: Value) -> Result<Value> {
         // parse input
-        let params: ReadFileInput = serde_json::from_value(input)
-            .map_err(|e| RoutexError::ToolFailed {
+        let params: ReadFileInput =
+            serde_json::from_value(input).map_err(|e| RoutexError::ToolFailed {
                 name: self.name().to_string(),
                 reason: format!("invalid input: {}", e),
             })?;
@@ -153,13 +149,11 @@ impl Tool for ReadFileTool {
         // read the file
         // tokio::fs::read is the async version of std::fs::read
         // It does not block the Tokio thread pool
-        let bytes = tokio::fs::read(&path).await
+        let bytes = tokio::fs::read(&path)
+            .await
             .map_err(|e| RoutexError::ToolFailed {
                 name: self.name().to_string(),
-                reason: format!(
-                    "could not read '{}': {}",
-                    params.path, e
-                ),
+                reason: format!("could not read '{}': {}", params.path, e),
             })?;
 
         // truncate if needed
@@ -188,9 +182,9 @@ impl Tool for ReadFileTool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
     use std::io::Write;
     use tempfile::TempDir;
-    use serde_json::json;
 
     fn write_temp_file(dir: &TempDir, name: &str, content: &str) -> PathBuf {
         let path = dir.path().join(name);
@@ -204,13 +198,14 @@ mod tests {
         let dir = TempDir::new().unwrap();
         write_temp_file(&dir, "test.txt", "hello routex-rs");
 
-        let tool = ReadFileTool::new(
-            Some(dir.path().to_str().unwrap().to_string())
-        );
+        let tool = ReadFileTool::new(Some(dir.path().to_str().unwrap().to_string()));
 
-        let result = tool.execute(json!({
-            "path": "test.txt"
-        })).await.unwrap();
+        let result = tool
+            .execute(json!({
+                "path": "test.txt"
+            }))
+            .await
+            .unwrap();
 
         assert_eq!(result["content"], "hello routex-rs");
         assert_eq!(result["truncated"], false);
@@ -222,19 +217,17 @@ mod tests {
         let large_content = "A".repeat(1000);
         write_temp_file(&dir, "large.txt", &large_content);
 
-        let tool = ReadFileTool::new(
-            Some(dir.path().to_str().unwrap().to_string())
-        );
+        let tool = ReadFileTool::new(Some(dir.path().to_str().unwrap().to_string()));
 
-        let result = tool.execute(json!({
-            "path": "large.txt",
-            "max_bytes": 100
-        })).await.unwrap();
+        let result = tool
+            .execute(json!({
+                "path": "large.txt",
+                "max_bytes": 100
+            }))
+            .await
+            .unwrap();
 
-        assert_eq!(
-            result["content"].as_str().unwrap().len(),
-            100
-        );
+        assert_eq!(result["content"].as_str().unwrap().len(), 100);
         assert_eq!(result["truncated"], true);
     }
 
@@ -242,32 +235,36 @@ mod tests {
     async fn test_path_traversal_blocked() {
         let dir = TempDir::new().unwrap();
 
-        let tool = ReadFileTool::new(
-            Some(dir.path().to_str().unwrap().to_string())
-        );
+        let tool = ReadFileTool::new(Some(dir.path().to_str().unwrap().to_string()));
 
         // Attempt to escape the base directory
-        let result = tool.execute(json!({
-            "path": "../../etc/passwd"
-        })).await;
+        let result = tool
+            .execute(json!({
+                "path": "../../etc/passwd"
+            }))
+            .await;
 
         assert!(result.is_err());
-        assert!(result.as_ref().unwrap_err().to_string()
-            .contains("outside the allowed directory")
-            || result.unwrap_err().to_string().contains("not found")
+        assert!(
+            result
+                .as_ref()
+                .unwrap_err()
+                .to_string()
+                .contains("outside the allowed directory")
+                || result.unwrap_err().to_string().contains("not found")
         );
     }
 
     #[tokio::test]
     async fn test_missing_file_returns_error() {
         let dir = TempDir::new().unwrap();
-        let tool = ReadFileTool::new(
-            Some(dir.path().to_str().unwrap().to_string())
-        );
+        let tool = ReadFileTool::new(Some(dir.path().to_str().unwrap().to_string()));
 
-        let result = tool.execute(json!({
-            "path": "nonexistent.txt"
-        })).await;
+        let result = tool
+            .execute(json!({
+                "path": "nonexistent.txt"
+            }))
+            .await;
 
         assert!(result.is_err());
     }
