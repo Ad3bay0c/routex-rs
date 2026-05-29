@@ -1,3 +1,4 @@
+pub mod mcp;
 pub mod read_file;
 pub mod web_search;
 pub mod wikipedia;

@@ -71,6 +71,24 @@ impl Runtime {
                 "web_search" => {
                     registry.register(crate::tools::web_search::WebSearchTool::new());
                 }
+                "wikipedia" => {
+                    registry.register(crate::tools::wikipedia::WikipediaTool::new());
+                }
+                "read_file" => {
+                    registry.register(crate::tools::read_file::ReadFileTool::new(
+                        tool_cfg.base_dir.clone(),
+                    ));
+                }
+                "write_file" => {
+                    registry.register(crate::tools::write_file::WriteFileTool::new(
+                        tool_cfg.base_dir.clone(),
+                    ));
+                }
+                "mcp" => {
+                    // MCP servers are registered asynchronously
+                    // We store the config and connect in run()
+                    // Skip here — handled separately
+                }
                 unknown => {
                     return Err(RoutexError::ToolNotFound {
                         name: unknown.to_string(),
@@ -103,7 +121,39 @@ impl Runtime {
     ///   4. Returns the final output when all agents complete
     pub async fn run(&self) -> Result<RunResult> {
         let adapter = build_adapter(&self.config)?;
-        let registry = self.registry.clone();
+        let mut registry = self.registry.clone();
+
+        // Connect MCP servers and register their tools
+        for tool_cfg in &self.config.tools {
+            if tool_cfg.name == "mcp" {
+                let server_url = tool_cfg.extra.get("server_url").cloned().ok_or_else(|| {
+                    RoutexError::Config("mcp tool requires server_url in extra".to_string())
+                })?;
+
+                let server_name = tool_cfg.extra.get("server_name").cloned();
+
+                // Extract header_* keys as HTTP headers
+                let headers: Vec<(String, String)> = tool_cfg
+                    .extra
+                    .iter()
+                    .filter(|(k, _)| k.starts_with("header_"))
+                    .map(|(k, v)| {
+                        let header_name = k.trim_start_matches("header_").to_string();
+                        (header_name, v.clone())
+                    })
+                    .collect();
+
+                let mcp_config = crate::tools::mcp::server::ServerConfig {
+                    server_url,
+                    server_name,
+                    headers,
+                };
+
+                if let Some(reg) = Arc::get_mut(&mut registry){
+                    crate::tools::mcp::server::register_server(mcp_config,  reg).await?;
+                }
+            }
+        }
 
         self.validate_tool_references()?;
 
